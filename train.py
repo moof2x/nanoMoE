@@ -145,7 +145,9 @@ ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=
 # 2. modded-nanogpt sharded: fineweb_{train,val}_NNNNNN.bin (256 x int32 header + uint16 tokens)
 import glob as _glob
 
-data_dir = os.path.join('data', dataset)
+data_path = os.environ.get('DATA_PATH', '.')
+data_dir = os.path.join(data_path, 'data', dataset)
+
 
 def _load_shard(filepath):
     """Load a modded-nanogpt format shard file (header + uint16 tokens)."""
