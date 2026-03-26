@@ -140,15 +140,52 @@ device_type = 'cuda' if 'cuda' in device else 'cpu' # for later use in torch.aut
 ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
 ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
 
-# poor man's data loader
+# data loader — supports two formats:
+# 1. Original nanoGPT: single train.bin / val.bin (raw uint16 tokens, no header)
+# 2. modded-nanogpt sharded: fineweb_{train,val}_NNNNNN.bin (256 x int32 header + uint16 tokens)
+import glob as _glob
+
 data_dir = os.path.join('data', dataset)
+
+def _load_shard(filepath):
+    """Load a modded-nanogpt format shard file (header + uint16 tokens)."""
+    header = np.fromfile(filepath, dtype=np.int32, count=256)
+    assert header[0] == 20240520, f"Bad magic number in {filepath}"
+    assert header[1] == 1, f"Unsupported version in {filepath}"
+    num_tokens = int(header[2])
+    # tokens start after 256 * 4 = 1024 bytes of header
+    tokens = np.memmap(filepath, dtype=np.uint16, mode='r', offset=256 * 4, shape=(num_tokens,))
+    return tokens
+
+def _detect_data_format(data_dir):
+    """Detect whether data_dir uses sharded (modded-nanogpt) or monolithic (nanoGPT) format."""
+    train_shards = sorted(_glob.glob(os.path.join(data_dir, 'fineweb_train_*.bin')))
+    val_shards = sorted(_glob.glob(os.path.join(data_dir, 'fineweb_val_*.bin')))
+    if train_shards and val_shards:
+        return 'sharded', train_shards, val_shards
+    # Fall back to original monolithic format
+    return 'monolithic', None, None
+
+_data_format, _train_shards, _val_shards = _detect_data_format(data_dir)
+if _data_format == 'sharded':
+    print(f"Using sharded data format: {len(_train_shards)} train shards, {len(_val_shards)} val shards")
+else:
+    print(f"Using monolithic data format (train.bin / val.bin)")
+
 def get_batch(split):
-    # We recreate np.memmap every batch to avoid a memory leak, as per
-    # https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122
-    if split == 'train':
-        data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
+    if _data_format == 'sharded':
+        # Pick a random shard, then sample random positions within it
+        if split == 'train':
+            shard_path = _train_shards[np.random.randint(len(_train_shards))]
+        else:
+            shard_path = _val_shards[np.random.randint(len(_val_shards))]
+        data = _load_shard(shard_path)
     else:
-        data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
+        # Original monolithic format — recreate memmap each call to avoid memory leak
+        if split == 'train':
+            data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
+        else:
+            data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
     ix = torch.randint(len(data) - block_size, (batch_size,))
     x = torch.stack([torch.from_numpy((data[i:i+block_size]).astype(np.int64)) for i in ix])
     y = torch.stack([torch.from_numpy((data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
