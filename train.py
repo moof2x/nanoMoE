@@ -45,7 +45,7 @@ always_save_checkpoint = True # if True, always save a checkpoint after each eva
 init_from = 'scratch' # 'scratch' or 'resume' or 'gpt2*'
 
 # wandb logging
-wandb_log = True # False # disabled by default
+wandb_log = False # disabled by default
 wandb_project = 'nano-moe'
 wandb_run_name = 'gpt2-124M-owt' + str(time.time())
 
