@@ -37,8 +37,8 @@ from model import GPTConfig, GPT
 # default config values designed to train a gpt2 (124M) on OpenWebText
 # I/O
 out_dir = 'out'
-eval_interval = 2000
-log_interval = 1
+eval_interval = 500
+log_interval = 10
 eval_iters = 200
 eval_only = False # if True, script exits right after the first eval
 always_save_checkpoint = True # if True, always save a checkpoint after each eval
@@ -56,31 +56,31 @@ batch_size = 12 # if gradient_accumulation_steps > 1, this is the micro-batch si
 block_size = 1024
 
 # model
-n_layer = 12
-n_head = 12
-n_embd = 768
+n_layer = 6
+n_head = 6
+n_embd = 384
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
 bias = False # do we use bias inside LayerNorm and Linear layers?
 
 # moe
-n_exp = 1 # if n_exp = 1 we just use regular MLP layers
+n_exp = 8 # if n_exp = 1 we just use regular MLP layers
 top_k = 2
-use_aux_loss = False
-use_router_z_loss = False
+use_aux_loss = True
+use_router_z_loss = True
 use_noisy_top_k = False
-aux_loss_weight = 0.001
-router_z_loss_weight = 0.01
+aux_loss_weight = 0.01
+router_z_loss_weight = 0.001
 train_capacity = 1.25
 eval_capacity = 2.0
 min_capacity = 4
 stride = 2
-use_switch_tfm_init = False
+use_switch_tfm_init = True
 switch_tfm_init_scale = 1.0  # recommended 0.1 for stability (pg.10, https://arxiv.org/abs/2101.03961)
-router_use_full_prec = False
+router_use_full_prec = True
 
 # adamw optimizer
 learning_rate = 6e-4 # max learning rate
-max_iters = 600000 # total number of training iterations
+max_iters = 50000 # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
@@ -89,7 +89,7 @@ grad_clip = 1.0 # clip gradients at this value, or disable if == 0.0
 # learning rate decay settings
 decay_lr = True # whether to decay the learning rate
 warmup_iters = 2000 # how many steps to warm up for
-lr_decay_iters = 600000 # should be ~= max_iters per Chinchilla
+lr_decay_iters = 50000 # should be ~= max_iters per Chinchilla
 min_lr = 6e-5 # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 
 # DDP settings
@@ -329,6 +329,7 @@ t0 = time.time()
 local_iter_num = 0 # number of iterations in the lifetime of this process
 raw_model = model.module if ddp else model # unwrap DDP container if needed
 running_mfu = -1.0
+start_time = time.time()
 while True:
 
     # determine and set the learning rate for this iteration
@@ -340,6 +341,8 @@ while True:
     if iter_num % eval_interval == 0 and master_process:
         losses = estimate_loss()
         print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+        training_time_ms = 1000 * (time.time() - start_time)
+        print(f"step:{iter_num}/{max_iters} val_loss:{losses['val']:.4f} train_time:{training_time_ms:.0f}ms step_avg:{training_time_ms/max(iter_num, 1):.2f}ms")
         if wandb_log:
             wandb.log({
                 "iter": iter_num,
